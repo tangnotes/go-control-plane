@@ -39,6 +39,12 @@ const (
 	ListenerPort = 10000
 	UpstreamHost = "www.envoyproxy.io"
 	UpstreamPort = 80
+
+	ClusterName2  = "test-cluster2"
+	ListenerPort2 = 8080
+	ListenerName2 = "listener_2"
+	RouteName2    = "local_route2"
+	UpstreamPort2 = 8000
 )
 
 func makeCluster(clusterName string) *cluster.Cluster {
@@ -49,6 +55,16 @@ func makeCluster(clusterName string) *cluster.Cluster {
 		LbPolicy:             cluster.Cluster_ROUND_ROBIN,
 		LoadAssignment:       makeEndpoint(clusterName),
 		DnsLookupFamily:      cluster.Cluster_V4_ONLY,
+	}
+}
+
+func makeCluster2(clusterName string) *cluster.Cluster {
+	return &cluster.Cluster{
+		Name:                 clusterName,
+		ConnectTimeout:       durationpb.New(5 * time.Second),
+		ClusterDiscoveryType: &cluster.Cluster_Type{Type: cluster.Cluster_STATIC},
+		LbPolicy:             cluster.Cluster_ROUND_ROBIN,
+		LoadAssignment:       makeEndpoint2(clusterName),
 	}
 }
 
@@ -66,6 +82,47 @@ func makeEndpoint(clusterName string) *endpoint.ClusterLoadAssignment {
 									Address:  UpstreamHost,
 									PortSpecifier: &core.SocketAddress_PortValue{
 										PortValue: UpstreamPort,
+									},
+								},
+							},
+						},
+					},
+				},
+			}},
+		}},
+	}
+}
+
+func makeEndpoint2(clusterName string) *endpoint.ClusterLoadAssignment {
+	return &endpoint.ClusterLoadAssignment{
+		ClusterName: clusterName,
+		Endpoints: []*endpoint.LocalityLbEndpoints{{
+			LbEndpoints: []*endpoint.LbEndpoint{{
+				HostIdentifier: &endpoint.LbEndpoint_Endpoint{
+					Endpoint: &endpoint.Endpoint{
+						Address: &core.Address{
+							Address: &core.Address_SocketAddress{
+								SocketAddress: &core.SocketAddress{
+									Protocol: core.SocketAddress_TCP,
+									Address:  "127.0.0.1",
+									PortSpecifier: &core.SocketAddress_PortValue{
+										PortValue: UpstreamPort2,
+									},
+								},
+							},
+						},
+					},
+				},
+			}, {
+				HostIdentifier: &endpoint.LbEndpoint_Endpoint{
+					Endpoint: &endpoint.Endpoint{
+						Address: &core.Address{
+							Address: &core.Address_SocketAddress{
+								SocketAddress: &core.SocketAddress{
+									Protocol: core.SocketAddress_TCP,
+									Address:  "127.0.0.2",
+									PortSpecifier: &core.SocketAddress_PortValue{
+										PortValue: UpstreamPort2,
 									},
 								},
 							},
@@ -96,6 +153,30 @@ func makeRoute(routeName, clusterName string) *route.RouteConfiguration {
 						},
 						HostRewriteSpecifier: &route.RouteAction_HostRewriteLiteral{
 							HostRewriteLiteral: UpstreamHost,
+						},
+					},
+				},
+			}},
+		}},
+	}
+}
+
+func makeRoute2(routeName, clusterName string) *route.RouteConfiguration {
+	return &route.RouteConfiguration{
+		Name: routeName,
+		VirtualHosts: []*route.VirtualHost{{
+			Name:    "local_service",
+			Domains: []string{"*"},
+			Routes: []*route.Route{{
+				Match: &route.RouteMatch{
+					PathSpecifier: &route.RouteMatch_Prefix{
+						Prefix: "/",
+					},
+				},
+				Action: &route.Route_Route{
+					Route: &route.RouteAction{
+						ClusterSpecifier: &route.RouteAction_Cluster{
+							Cluster: clusterName,
 						},
 					},
 				},
@@ -150,6 +231,52 @@ func makeHTTPListener(listenerName, route string) *listener.Listener {
 	}
 }
 
+func makeHTTPListener2(listenerName, route string) *listener.Listener {
+	routerConfig, _ := anypb.New(&router.Router{})
+	// HTTP filter configuration
+	manager := &hcm.HttpConnectionManager{
+		CodecType:  hcm.HttpConnectionManager_AUTO,
+		StatPrefix: "http",
+		RouteSpecifier: &hcm.HttpConnectionManager_Rds{
+			Rds: &hcm.Rds{
+				ConfigSource:    makeConfigSource(),
+				RouteConfigName: route,
+			},
+		},
+		HttpFilters: []*hcm.HttpFilter{{
+			Name:       "http-router",
+			ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: routerConfig},
+		}},
+	}
+	pbst, err := anypb.New(manager)
+	if err != nil {
+		panic(err)
+	}
+
+	return &listener.Listener{
+		Name: listenerName,
+		Address: &core.Address{
+			Address: &core.Address_SocketAddress{
+				SocketAddress: &core.SocketAddress{
+					Protocol: core.SocketAddress_TCP,
+					Address:  "0.0.0.0",
+					PortSpecifier: &core.SocketAddress_PortValue{
+						PortValue: ListenerPort2,
+					},
+				},
+			},
+		},
+		FilterChains: []*listener.FilterChain{{
+			Filters: []*listener.Filter{{
+				Name: "http-connection-manager",
+				ConfigType: &listener.Filter_TypedConfig{
+					TypedConfig: pbst,
+				},
+			}},
+		}},
+	}
+}
+
 func makeConfigSource() *core.ConfigSource {
 	source := &core.ConfigSource{}
 	source.ResourceApiVersion = resource.DefaultAPIVersion
@@ -171,9 +298,12 @@ func makeConfigSource() *core.ConfigSource {
 func GenerateSnapshot() *cache.Snapshot {
 	snap, _ := cache.NewSnapshot("1",
 		map[resource.Type][]types.Resource{
-			resource.ClusterType:  {makeCluster(ClusterName)},
-			resource.RouteType:    {makeRoute(RouteName, ClusterName)},
-			resource.ListenerType: {makeHTTPListener(ListenerName, RouteName)},
+			resource.ClusterType: {makeCluster(ClusterName),
+				makeCluster2(ClusterName2)},
+			resource.RouteType: {makeRoute(RouteName, ClusterName),
+				makeRoute2(RouteName2, ClusterName2)},
+			resource.ListenerType: {makeHTTPListener(ListenerName, RouteName),
+				makeHTTPListener2(ListenerName2, RouteName2)},
 		},
 	)
 	return snap

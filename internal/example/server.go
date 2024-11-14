@@ -89,7 +89,7 @@ func (s *Server) Run(port uint) {
 
 	s.registerServer(grpcServer)
 
-	log.Printf("management server listening on %d\n", port)
+	log.Printf("(1)management server listening on %d\n", port)
 	if err = grpcServer.Serve(lis); err != nil {
 		log.Println(err)
 	}
@@ -133,7 +133,7 @@ func RunServer(srv server.Server, port uint) {
 
 	registerServer(grpcServer, srv)
 
-	log.Printf("management server listening on %d\n", port)
+	log.Printf("(2) management server listening on %d\n", port)
 	if err = grpcServer.Serve(lis); err != nil {
 		log.Println(err)
 	}
